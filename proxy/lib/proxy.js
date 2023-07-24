@@ -9,8 +9,8 @@ const __dirname = path.resolve();
 
 // Customer-provided configuration
 const ORG_ID_18_CONFIG_VAR_NAME = 'SALESFORCE_ADDON_ORG_ID_18';
-const FUNCTION_URL_CONFIG_VAR_NAME = 'FUNCTION_URL';
-const FUNCTION_PORT_CONFIG_VAR_NAME = 'FUNCTION_PORT';
+const HEROKU_SERVICE_URL_CONFIG_VAR_NAME = 'HEROKU_SERVICE_URL';
+const HEROKU_SERVICE_PORT_CONFIG_VAR_NAME = 'HEROKU_SERVICE_PORT';
 const ENCODED_PRIVATE_KEY_CONFIG_VAR_NAME = 'SALESFORCE_ADDON_ENCODED_PRIVATE_KEY';
 const PRIVATE_KEY_FILEPATH_CONFIG_VAR_NAME = 'PRIVATE_KEY_FILEPATH';
 const CONSUMER_KEY_CONFIG_VAR_NAME = 'SALESFORCE_ADDON_CONSUMER_KEY';
@@ -20,7 +20,7 @@ const SF_AUDIENCE_CONFIG_VAR_NAME = 'SF_AUDIENCE';
 
 // Headers
 const HEADER_REQUEST_ID = 'x-request-id';
-const HEADER_FUNCTION_REQUEST_CONTEXT = 'ce-sffncontext';
+const HEADER_HEROKU_SERVICE_REQUEST_CONTEXT = 'ce-sffncontext';
 const HEADER_SALESFORCE_CONTEXT = 'ce-sfcontext';
 const HEADER_EXTRA_INFO = 'x-extra-info';
 const HEADER_ORG_ID_18 = 'x-org-id-18';
@@ -59,9 +59,9 @@ export class Config {
     assemble() {
         this.proxyPort = this.env['PORT'] || 3000;
         this.runtimeCLIPath = this.env[RUNTIME_CLI_FILEPATH_CONFIG_VAR_NAME] || `${__dirname}/../node_modules/@heroku/sf-fx-runtime-nodejs/bin/cli.js`;
-        this.functionPort = this.env[FUNCTION_PORT_CONFIG_VAR_NAME] || 8080;
-        this.functionDebugPort = this.env[DEBUG_PORT_CONFIG_VAR_NAME];
-        this.functionUrl = `${(this.env[FUNCTION_URL_CONFIG_VAR_NAME] || 'http://localhost')}:${this.functionPort}`;
+        this.herokuServicePort = this.env[HEROKU_SERVICE_PORT_CONFIG_VAR_NAME] || 8080;
+        this.herokuServiceDebugPort = this.env[DEBUG_PORT_CONFIG_VAR_NAME];
+        this.herokuServiceUrl = `${(this.env[HEROKU_SERVICE_URL_CONFIG_VAR_NAME] || 'http://localhost')}:${this.herokuServicePort}`;
         this.orgId18 = this.env[ORG_ID_18_CONFIG_VAR_NAME];
         const encodedPrivateKey = this.env[ENCODED_PRIVATE_KEY_CONFIG_VAR_NAME];
         if (encodedPrivateKey) {
@@ -83,11 +83,11 @@ export class Config {
         }
 
         if (!existsSync(this.runtimeCLIPath)) {
-            throw Error(`Function start CLI not found ${this.runtimeCLIPath}.  Ensure that function's buildpack ./bin/compile was run.`);
+            throw Error(`Function start CLI not found ${this.runtimeCLIPath}.  Ensure that herokuService's buildpack ./bin/compile was run.`);
         }
 
         validateRequiredConfig(ORG_ID_18_CONFIG_VAR_NAME, this.orgId18);
-        validateRequiredConfig(FUNCTION_PORT_CONFIG_VAR_NAME, this.functionPort);
+        validateRequiredConfig(HEROKU_SERVICE_PORT_CONFIG_VAR_NAME, this.herokuServicePort);
         validateRequiredConfig(`${ENCODED_PRIVATE_KEY_CONFIG_VAR_NAME} or ${PRIVATE_KEY_FILEPATH_CONFIG_VAR_NAME}`,
             this.privateKey);
         validateRequiredConfig(CONSUMER_KEY_CONFIG_VAR_NAME, this.clientId);
@@ -98,7 +98,7 @@ export class Config {
 const config = new Config(process.env);
 
 /**
- * Base context providing utilties for extending classes.
+ * Base context providing utilities for extending classes.
  */
 class BaseContext {
     constructor(requestId) {
@@ -111,17 +111,17 @@ class BaseContext {
     }
 }
 /**
- * Header 'ce-sffncontext': function request context.
+ * Header 'ce-sffncontext': Heroku Service request context.
  *
  * Eg:
  *  {
- *     'id': '00Dxx0000006IYJEA2-4Y4W3Lw_LkoskcHdEaZze-uuid-typescriptfunction-2023-03-23T15:18:53.429-0700',
- *     'functionName': 'typescriptfunction',
+ *     'id': '00Dxx0000006IYJEA2-4Y4W3Lw_LkoskcHdEaZze-uuid-typescriptservice-2023-03-23T15:18:53.429-0700',
+ *     'herokuServiceName': 'typescriptservice',
  *     'resource': 'https://...',
  *     'source': 'urn:event:from:salesforce/<instance>/<orgId>/<platform origin, eg apex>',
- *     'type': 'com.salesforce.function.invoke.sync',
+ *     'type': 'com.salesforce.herokuservice.invoke.sync',
  *     'requestTime': '2023-03-23T15:18:53.429-0700',
- *     'functionInvocationId': '<HerokuServiceAsyncInvocationRequest__c.ID>',
+ *     'herokuServiceInvocationId': '<HerokuServiceAsyncInvocationRequest__c.ID>',
  *     'permissionSets': '[ 'MyPermissionSet' ]'
  *   }
  */
@@ -130,18 +130,18 @@ export class FunctionContext extends BaseContext {
         super(requestId);
         this.sfFnContext =  super.decodeAndParse(encodedContext);
         this.type = this.sfFnContext.type;
-        this.functionName = this.sfFnContext.functionName;
-        this.functionInvocationId = this.sfFnContext.functionInvocationId;
+        this.herokuServiceName = this.sfFnContext.herokuServiceName;
+        this.herokuServiceInvocationId = this.sfFnContext.herokuServiceInvocationId;
         this.permissionSets = this.sfFnContext.permissionSets;
         this.accessToken = this.sfFnContext.accessToken;
     }
 
     validate() {
         if (!(this.type === HEROKU_SERVICE_INVOCATION_TYPE_SYNC || this.type === HEROKU_SERVICE_INVOCATION_TYPE_ASYNC)) {
-            throwError(`Invalid function invocation type ${this.type}`, 400, this.requestId);
+            throwError(`Invalid Heroku Service invocation type ${this.type}`, 400, this.requestId);
         }
 
-        if (this.type === HEROKU_SERVICE_INVOCATION_TYPE_ASYNC && !this.functionInvocationId) {
+        if (this.type === HEROKU_SERVICE_INVOCATION_TYPE_ASYNC && !this.herokuServiceInvocationId) {
             throwError('HerokuServiceAsyncInvocationRequest__c ID not provided for async invocation', 400, this.requestId);
         }
 
@@ -258,16 +258,16 @@ class BaseRequestHandler {
         const headers = this.request.headers;
 
         // Function request context
-        const encodedFunctionContextHeader = headers[HEADER_FUNCTION_REQUEST_CONTEXT];
+        const encodedFunctionContextHeader = headers[HEADER_HEROKU_SERVICE_REQUEST_CONTEXT];
         if (!encodedFunctionContextHeader) {
-            throwError(`Function context header ${HEADER_FUNCTION_REQUEST_CONTEXT} not found`, 400, this.requestId);
+            throwError(`Function context header ${HEADER_HEROKU_SERVICE_REQUEST_CONTEXT} not found`, 400, this.requestId);
         }
 
         let sfFnContext;
         try {
             sfFnContext = new FunctionContext(this.requestId, encodedFunctionContextHeader);
         } catch (err) {
-            throwError(`Invalid ${HEADER_FUNCTION_REQUEST_CONTEXT} format - expected base64 encoded header: ${err.message}`, 400, this.requestId);
+            throwError(`Invalid ${HEADER_HEROKU_SERVICE_REQUEST_CONTEXT} format - expected base64 encoded header: ${err.message}`, 400, this.requestId);
         }
         sfFnContext.validate();
 
@@ -302,7 +302,7 @@ class BaseRequestHandler {
      *  - ce-datacontenttype: data type of request
      *  - ce-type: type of request
      *  - ce-sfcontext: Salesforce context - context of invoking Organization
-     *  - ce-sffncontext: context of function request
+     *  - ce-sffncontext: context of Heroku Service request
      *
      * @returns {{requestId: string, requestProvidedAccessToken: string}}
      */
@@ -399,7 +399,7 @@ class BaseRequestHandler {
     }
 
     /**
-     * Validate expected payload and that the function invoker is of the expected org.
+     * Validate expected payload and that the Heroku Service invoker is of the expected org.
      *
      * @returns {Promise<{requestId: string, requestProvidedAccessToken: string, sfFnContext: FunctionContext, sfContext: SalesforceContext}>}
      */
@@ -407,7 +407,7 @@ class BaseRequestHandler {
         // Parse and validate request
         const {requestId, requestProvidedAccessToken} = this.parseAndValidateHeaders();
 
-        // Parse and validate function and salesforce contexts
+        // Parse and validate Heroku Service and salesforce contexts
         const {sfFnContext, sfContext} = this.parseAndValidateContexts();
 
         // Validate that the context's orgId matches the accessToken
@@ -417,7 +417,7 @@ class BaseRequestHandler {
     }
 
     /**
-     * Mint and return function's token for requesting user using configured Connected App.
+     * Mint and return herokuService's token for requesting user using configured Connected App.
      *
      * If applicable, activate provided session-based Permission Set(s) to token.
      *
@@ -456,7 +456,7 @@ class BaseRequestHandler {
         };
 
         // Mint!
-        this.logger.info(`[${this.requestId}] Minting function ${isTest ? 'test ' : ' '}token for user ${sfContext.userContext.username}, audience ${jwtOpts.audience}, url ${url}, issuer ${jwtOpts.issuer.substring(0, 5)}...`);
+        this.logger.info(`[${this.requestId}] Minting Heroku Service ${isTest ? 'test ' : ' '}token for user ${sfContext.userContext.username}, audience ${jwtOpts.audience}, url ${url}, issuer ${jwtOpts.issuer.substring(0, 5)}...`);
         let mintTokenResponse;
         try {
             mintTokenResponse = await this.httpRequest(url, opts);
@@ -464,7 +464,7 @@ class BaseRequestHandler {
             let errMsg;
             if (err.response) {
                 const errResponse = JSON.parse(err.response.body);
-                errMsg = `Unable to mint function token: ${errResponse.error} (${errResponse.error_description})`;
+                errMsg = `Unable to mint Heroku Service token: ${errResponse.error} (${errResponse.error_description})`;
                 if (errMsg.includes('invalid_app_access') || errMsg.includes('user hasn\'t approved this consumer')) {
                     errMsg += `. Ensure that the target Connected App is set to "Admin approved users are pre-authorized" and user ${sfContext.userContext.username} is assigned to Connected App via a Permission Set`;
                 }
@@ -476,10 +476,10 @@ class BaseRequestHandler {
             throwError(errMsg, 403, this.requestId);
         }
 
-        this.logger.info(`[${this.requestId}] Minted function's token - hooray`);
+        this.logger.info(`[${this.requestId}] Minted herokuService's token - hooray`);
 
         return {
-            functionsAccessToken: mintTokenResponse.access_token,
+            herokuServiceAccessToken: mintTokenResponse.access_token,
             instanceUrl: mintTokenResponse.instance_url
         };
     }
@@ -489,10 +489,10 @@ class BaseRequestHandler {
      *
      * @param sfFnContext
      * @param sfContext
-     * @param functionsAccessToken
+     * @param herokuServiceAccessToken
      * @returns {Promise<void>}
      */
-    async activateSessionPermSet(sfFnContext, sfContext, functionsAccessToken) {
+    async activateSessionPermSet(sfFnContext, sfContext, herokuServiceAccessToken) {
         const permissionSets = sfFnContext.permissionSets;
         if (!permissionSets || permissionSets.length === 0) {
             this.logger.info(`[${this.requestId}] Skipping session-based Permission Sets activation`);
@@ -518,7 +518,7 @@ class BaseRequestHandler {
                                                   '/actions/standard/activateSessionPermSet');
         const opts = {
             method: 'POST',
-            headers: this.assembleSalesforceAPIHeaders(functionsAccessToken),
+            headers: this.assembleSalesforceAPIHeaders(herokuServiceAccessToken),
             json: {inputs: inputs},
             retry: {
                 limit: 1
@@ -556,22 +556,22 @@ class BaseRequestHandler {
     }
 
     /**
-     * Re-assemble the function's context setting function's accessToken.
+     * Re-assemble the herokuService's context setting herokuService's accessToken.
      *
      * @param sfFnContext
-     * @param functionsAccessToken
+     * @param herokuServiceAccessToken
      */
 
-    prepareFunctionRequest(sfFnContext, functionsAccessToken) {
+    prepareFunctionRequest(sfFnContext, herokuServiceAccessToken) {
         // Function's org-access token
-        sfFnContext.setAccessToken(functionsAccessToken);
-        this.request.headers[HEADER_FUNCTION_REQUEST_CONTEXT] = sfFnContext.toJsonEncoded();
+        sfFnContext.setAccessToken(herokuServiceAccessToken);
+        this.request.headers[HEADER_HEROKU_SERVICE_REQUEST_CONTEXT] = sfFnContext.toJsonEncoded();
 
-        this.logger.info(`[${this.requestId}] Prepared function request - let's go`);
+        this.logger.info(`[${this.requestId}] Prepared Heroku Service request - let's go`);
     }
 
     /**
-     * Enrich request with function's accessToken activating session-based Permission Sets, if applicable.
+     * Enrich request with herokuService's accessToken activating session-based Permission Sets, if applicable.
      *
      * @param sfFnContext
      * @param sfContext
@@ -579,13 +579,13 @@ class BaseRequestHandler {
      */
     async enrich(sfFnContext, sfContext) {
         // Mint token with configured Connected App
-        const {functionsAccessToken} = await this.mintToken(sfFnContext, sfContext);
+        const {herokuServiceAccessToken} = await this.mintToken(sfFnContext, sfContext);
 
         // Activate session-based Permission Sets, if applicable
-        await this.activateSessionPermSet(sfFnContext, sfContext, functionsAccessToken);
+        await this.activateSessionPermSet(sfFnContext, sfContext, herokuServiceAccessToken);
 
-        // Set token on function request context
-        this.prepareFunctionRequest(sfFnContext, functionsAccessToken);
+        // Set token on Heroku Service request context
+        this.prepareFunctionRequest(sfFnContext, herokuServiceAccessToken);
     }
 
     async httpRequest(url, opts, json = true) {
@@ -603,18 +603,18 @@ export class SyncRequestHandler extends BaseRequestHandler {
     }
 
     /**
-     * Handle sync function request.
+     * Handle sync Heroku Service request.
      *
      * @returns {Promise<void>}
      */
     async handle() {
         const {requestId, sfFnContext, sfContext} = await this.validate();
 
-        this.logger.info(`[${requestId}] Handling ${sfFnContext.type} request to function '${sfFnContext.functionName}'...`);
+        this.logger.info(`[${requestId}] Handling ${sfFnContext.type} request to Heroku Service '${sfFnContext.herokuServiceName}'...`);
 
         await this.enrich(sfFnContext, sfContext);
 
-        this.logger.info(`[${requestId}] Sending ${sfFnContext.type} request to function '${sfFnContext.functionName}'...`);
+        this.logger.info(`[${requestId}] Sending ${sfFnContext.type} request to Heroku Service '${sfFnContext.herokuServiceName}'...`);
     }
 }
 
@@ -628,13 +628,13 @@ export class AsyncRequestHandler extends BaseRequestHandler {
     }
 
     /**
-     * Handle async function request.
+     * Handle async Heroku Service request.
      *
      * @returns {Promise<void>}
      */
     async handle() {
         const { requestId, sfFnContext, sfContext } = await this.validate();
-        this.logger.info(`[${requestId}] Handling ${sfFnContext.type} request to function '${sfFnContext.functionName}'...`);
+        this.logger.info(`[${requestId}] Handling ${sfFnContext.type} request to Heroku Service '${sfFnContext.herokuServiceName}'...`);
 
         if (HEROKU_SERVICE_INVOCATION_TYPE_ASYNC !== sfFnContext.type) {
             throwError('Invalid request type', 400, requestId);
@@ -644,26 +644,26 @@ export class AsyncRequestHandler extends BaseRequestHandler {
 
         // TODO: Validate HerokuServiceAsyncInvocationRequest__c access and existence
 
-        this.logger.info(`[${requestId}] Sending ${sfFnContext.type} request to function '${sfFnContext.functionName}'...`);
+        this.logger.info(`[${requestId}] Sending ${sfFnContext.type} request to Heroku Service '${sfFnContext.herokuServiceName}'...`);
     }
 
     /**
-     * Update  async request's associated HerokuServiceAsyncInvocationRequest__c w/ function's response.
+     * Update  async request's associated HerokuServiceAsyncInvocationRequest__c w/ herokuService's response.
      *
      * @param sfFnContext
      * @param sfContext
-     * @param functionResponse
+     * @param herokuServiceResponse
      * @param statusCode
      * @param extraInfo
      * @returns {Promise<void>}
      */
-    async updateAsyncFunctionResponse(sfFnContext, sfContext, functionResponse, statusCode, extraInfo) {
-        const functionInvocationId = sfFnContext.functionInvocationId;
+    async updateAsyncFunctionResponse(sfFnContext, sfContext, herokuServiceResponse, statusCode, extraInfo) {
+        const herokuServiceInvocationId = sfFnContext.herokuServiceInvocationId;
         const accessToken = sfFnContext.accessToken;
         const userContext = sfContext.userContext;
         const afirObjectName =
             `${userContext.namespace ? `${userContext.namespace}__` : ''}HerokuServiceAsyncInvocationRequest__c`;
-        const uriPart = `/sobjects/${afirObjectName}/${functionInvocationId}`;
+        const uriPart = `/sobjects/${afirObjectName}/${herokuServiceInvocationId}`;
         const url = this.assembleSalesforceAPIUrl(sfContext.userContext.orgDomainUrl,
                                                   sfContext.apiVersion,
                                                   uriPart);
@@ -672,7 +672,7 @@ export class AsyncRequestHandler extends BaseRequestHandler {
 
         const afir = {};
         afir[`${userContext.namespace ? `${userContext.namespace}__` : ''}ExtraInfo__c`] = extraInfo;
-        afir[`${userContext.namespace ? `${userContext.namespace}__` : ''}Response__c`] = functionResponse;
+        afir[`${userContext.namespace ? `${userContext.namespace}__` : ''}Response__c`] = herokuServiceResponse;
         afir[`${userContext.namespace ? `${userContext.namespace}__` : ''}Status__c`] = status;
         afir[`${userContext.namespace ? `${userContext.namespace}__` : ''}StatusCode__c`] = statusCode;
         this.logger.debug(`[${this.requestId}] POST ${uriPart}: ${JSON.stringify(afir)}`);
@@ -693,7 +693,7 @@ export class AsyncRequestHandler extends BaseRequestHandler {
         } catch (err) {
             let errMsg = err.response ? err.response.body : err.message;
             if (errMsg.includes('The requested resource does not exist')) {
-                errMsg += `. Ensure that user ${sfContext.userContext.username} has access to ${afirObjectName} [${functionInvocationId}].`;
+                errMsg += `. Ensure that user ${sfContext.userContext.username} has access to ${afirObjectName} [${herokuServiceInvocationId}].`;
             }
 
             this.logger.error(errMsg);
@@ -701,20 +701,20 @@ export class AsyncRequestHandler extends BaseRequestHandler {
         }
 
         if (!response || response.statusCode !== 204) {
-            this.logger.error(`[${this.requestId}] Unable to save function response to ${afirObjectName} [${functionInvocationId}]: ${JSON.stringify(response.errors.join(','))}`);
+            this.logger.error(`[${this.requestId}] Unable to save Heroku Service response to ${afirObjectName} [${herokuServiceInvocationId}]: ${JSON.stringify(response.errors.join(','))}`);
         } else {
-            this.logger.info(`[${this.requestId}] Updated function response [${statusCode}] to ${afirObjectName} [${functionInvocationId}]`);
+            this.logger.info(`[${this.requestId}] Updated Heroku Service response [${statusCode}] to ${afirObjectName} [${herokuServiceInvocationId}]`);
         }
     }
 
     /**
-     * Handle async request invoking function.
+     * Handle async request invoking herokuService.
      *
      * @param sfFnContext
      * @returns {Promise<{body: string, extraInfo: string, statusCode: number}>}
      */
     async invokeFunction(sfFnContext) {
-        this.logger.info(`[${this.requestId}] Invoking async function ${sfFnContext.functionName}...`);
+        this.logger.info(`[${this.requestId}] Invoking async Heroku Service ${sfFnContext.herokuServiceName}...`);
 
         const opts = {
             method: this.request.method,
@@ -725,11 +725,11 @@ export class AsyncRequestHandler extends BaseRequestHandler {
         const startMs = Date.now();
         let statusCode, body, extraInfo;
         try {
-            // Invoke function!
-            const functionResponse = await this.httpRequest(this.config.functionUrl, opts, false);
-            statusCode = functionResponse.statusCode;
-            body = functionResponse.body;
-            extraInfo = functionResponse.headers[HEADER_EXTRA_INFO];
+            // Invoke Heroku Service!
+            const herokuServiceResponse = await this.httpRequest(this.config.herokuServiceUrl, opts, false);
+            statusCode = herokuServiceResponse.statusCode;
+            body = herokuServiceResponse.body;
+            extraInfo = herokuServiceResponse.headers[HEADER_EXTRA_INFO];
         } catch (err) {
             const response = err.response
             this.logger.error(response);
@@ -737,7 +737,7 @@ export class AsyncRequestHandler extends BaseRequestHandler {
             body = response.body;
             extraInfo = response.headers[HEADER_EXTRA_INFO];
         } finally {
-            this.logger.info(`[${this.requestId} Invoked function ${sfFnContext.functionName} in ${Date.now() - startMs}ms`);
+            this.logger.info(`[${this.requestId} Invoked Heroku Service ${sfFnContext.herokuServiceName} in ${Date.now() - startMs}ms`);
         }
 
         return {
@@ -761,12 +761,12 @@ export class HealthCheckRequestHandler extends BaseRequestHandler {
     }
 
     /**
-     * Handle healthcheck function request.
+     * Handle healthcheck Heroku Service request.
      *
      * @returns {Promise<void>}
      */
     async handle() {
-        this.request.log.info('Handling function /healthcheck request');
+        this.request.log.info('Handling Heroku Service /healthcheck request');
 
         const orgId18 = this.request.headers[HEADER_ORG_ID_18];
         if (!orgId18 || this.config.orgId18 !== orgId18) {
@@ -775,8 +775,8 @@ export class HealthCheckRequestHandler extends BaseRequestHandler {
         }
 
         try {
-            const functionResponse = await this.invokeFunction();
-            this.reply.send(functionResponse.body).code(functionResponse.statusCode);
+            const herokuServiceResponse = await this.invokeFunction();
+            this.reply.send(herokuServiceResponse.body).code(herokuServiceResponse.statusCode);
         } catch (err) {
             if (err.code && 'ECONNREFUSED' === err.code) {
                 this.logger.warn(`[${this.requestId}] Function not up.  Attempting to restart...`);
@@ -788,8 +788,8 @@ export class HealthCheckRequestHandler extends BaseRequestHandler {
                         });
                     }
                     await sleep(5000);
-                    const functionResponse = await this.invokeFunction();
-                    this.reply.send(functionResponse.body).code(functionResponse.statusCode);
+                    const herokuServiceResponse = await this.invokeFunction();
+                    this.reply.send(herokuServiceResponse.body).code(herokuServiceResponse.statusCode);
                 } catch (err) {
                     this.reply.send(err.message).code(503);
                 }
@@ -808,16 +808,16 @@ export class HealthCheckRequestHandler extends BaseRequestHandler {
 
         const startMs = Date.now();
         try {
-            // Invoke function!
-            return await this.httpRequest(this.config.functionUrl, opts, false);
+            // Invoke Heroku Service!
+            return await this.httpRequest(this.config.herokuServiceUrl, opts, false);
         } finally {
-            this.logger.info(`[${this.requestId}] Invoked function health check in ${Date.now() - startMs}ms`);
+            this.logger.info(`[${this.requestId}] Invoked Heroku Service health check in ${Date.now() - startMs}ms`);
         }
     }
 }
 
 /**
- * Handles start the function server.
+ * Handles start the Heroku Service server.
  */
 class FunctionServer {
     constructor(config, logger) {
@@ -831,30 +831,30 @@ class FunctionServer {
             'serve',
             `${__dirname}/..`,
             '-p',
-            this.config.functionPort
+            this.config.herokuServicePort
         ];
-        this.logger.info(`Starting function w/ args: ${args.join(' ')}`);
+        this.logger.info(`Starting Heroku Service w/ args: ${args.join(' ')}`);
 
-        if (this.config.functionDebugPort) {
+        if (this.config.herokuServiceDebugPort) {
             args.push('-d');
-            args.push(this.config.functionDebugPort);
+            args.push(this.config.herokuServiceDebugPort);
         }
 
-        this.functionProcess = spawn('node', args,{});
-        this.logger.info(`Started function started on port ${this.config.functionPort}, process pid ${this.functionProcess.pid}`);
+        this.herokuServiceProcess = spawn('node', args,{});
+        this.logger.info(`Started Heroku Service started on port ${this.config.herokuServicePort}, process pid ${this.herokuServiceProcess.pid}`);
 
-        this.functionProcess.stdout.on('data', buff => {
+        this.herokuServiceProcess.stdout.on('data', buff => {
             const line = buff.toLocaleString();
             this.logger.info(`[fn] ${line}`);
         });
-        this.functionProcess.stderr.on('data', buff => {
+        this.herokuServiceProcess.stderr.on('data', buff => {
             const line = buff.toLocaleString();
             this.logger.info(`[fn] ${line}`);
         });
-        this.functionProcess.on('error', err => {
-            this.logger.error(`[fn] Error starting function: ${err.message}`);
+        this.herokuServiceProcess.on('error', err => {
+            this.logger.error(`[fn] Error starting Heroku Service: ${err.message}`);
         });
-        this.functionProcess.on('exit', code => {
+        this.herokuServiceProcess.on('exit', code => {
             this.logger.info(`Function process exited with code ${code}`);
             process.exit(1);
         });
@@ -868,11 +868,11 @@ export class ProxyServer {
     constructor(fastify) {
         this.fastify = fastify;
         this.logger = fastify.log;
-        this.functionServer = new FunctionServer(config, this.logger);
+        this.herokuServiceServer = new FunctionServer(config, this.logger);
     }
 
     /**
-     * Validate required configuration and start function server.
+     * Validate required configuration and start Heroku Service server.
      */
     validate() {
         config.assemble().validate();
@@ -886,10 +886,10 @@ export class ProxyServer {
     configure() {
         /**
          * Register 'http-proxy' plugin to handle validating and enriching sync requests.  The request is forwarded to
-         * the function.
+         * the herokuService.
          */
         this.fastify.register(proxy, {
-            upstream: config.functionUrl,
+            upstream: config.herokuServiceUrl,
             prefix: '/sync',
             // Validate and enrich sync requests
             preHandler: async (request, reply) => {
@@ -899,7 +899,7 @@ export class ProxyServer {
             replyOptions: {
                 onError: (reply, error) => {
                     if (error.statusCode && 503 === error.statusCode) {
-                        this.logger.warn('Function request failed with 503 - implement function health check, restart (if necessary), and retry');
+                        this.logger.warn('Function request failed with 503 - implement Heroku Service health check, restart (if necessary), and retry');
                     }
                     reply.send(error);
                 }
@@ -909,10 +909,10 @@ export class ProxyServer {
         /**
          * Route to handle async requests.
          *
-         * Requests are validate, a function token is minted and apply to the request, and finally a response is
-         * sent to disconnect the original request.  The 'onResponse' handler then makes a separate request to the function.
+         * Requests are validate, a Heroku Service token is minted and apply to the request, and finally a response is
+         * sent to disconnect the original request.  The 'onResponse' handler then makes a separate request to the herokuService.
          */
-        this.fastify.post('/async', async function (request, reply) {
+        this.fastify.post('/async', async (request, reply) => {
             const requestHandler = new AsyncRequestHandler(config, request, reply);
             await requestHandler.handle();
             reply.code(201);
@@ -935,10 +935,10 @@ export class ProxyServer {
         });
 
         /**
-         * Route to check health of function process.
+         * Route to check health of Heroku Service process.
          */
         this.fastify.register(proxy, {
-            upstream: config.functionUrl,
+            upstream: config.herokuServiceUrl,
             prefix: '/healthcheck',
             preHandler: async (request, reply) => {
                 const requestHandler = new HealthCheckRequestHandler(request, reply);
@@ -947,11 +947,11 @@ export class ProxyServer {
         });
 
         /**
-         * If close is called, also kill function server.
+         * If close is called, also kill Heroku Service server.
          */
         this.fastify.addHook('onClose', async (instance) => {
-            if (this.functionServer && this.functionServer.functionProcess) {
-                this.functionServer.functionProcess.kill();
+            if (this.herokuServiceServer && this.herokuServiceServer.herokuServiceProcess) {
+                this.herokuServiceServer.herokuServiceProcess.kill();
             }
         });
 
@@ -959,12 +959,12 @@ export class ProxyServer {
     }
 
     /**
-     * Start function server.
+     * Start Heroku Service server.
      *
      * @returns {ProxyServer}
      */
     startFunctionServer() {
-        this.functionServer.start();
+        this.herokuServiceServer.start();
         return this;
     }
 
