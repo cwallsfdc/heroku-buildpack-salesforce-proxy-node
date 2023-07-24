@@ -10,7 +10,7 @@ if [ ! -d $SF_FX_RUNTIME ]; then
     exit 1
 fi
 
-echo "Copying $PWD/proxy to ${build_dir}..."
-cp -r "$PWD/proxy" "${build_dir}"
+echo "Copying $0/../proxy to ${build_dir}..."
+cp -r "$0/../proxy" "${build_dir}"
 cd "${build_dir}/proxy"
 npm install
