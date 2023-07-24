@@ -10,8 +10,9 @@ if [ ! -d $SF_FX_RUNTIME ]; then
     exit 1
 fi
 
-ls "$0/.."
-echo "Copying $0/../proxy to ${build_dir}..."
-cp -r "$0/../proxy" "${build_dir}"
+BUILDPACK_DIR=$(readlink -f $(dirname "$0"))/..
+echo $BUILDPACK_DIR
+echo "Copying ${BUILDPACK_DIR}/proxy to ${build_dir}..."
+cp -r "${BUILDPACK_DIR}/proxy" "${build_dir}"
 cd "${build_dir}/proxy"
 npm install
