@@ -60,7 +60,7 @@ export class Config {
         const values = [];
         Object.keys(env).forEach((key) => {
             if (regex.test(key)) {
-                values.push(env[env]);
+                values.push(env[key]);
             }
         });
         return values;
