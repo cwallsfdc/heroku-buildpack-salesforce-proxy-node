@@ -56,19 +56,53 @@ export class Config {
         this.env = env;
     }
 
+    filter(env, regex) {
+        const values = [];
+        Object.keys(env).forEach((key) => {
+            if (regex.test(key)) {
+                values.push(env[env]);
+            }
+        });
+        return values;
+    }
+
     assemble() {
         this.proxyPort = this.env['PORT'] || 3000;
-        this.runtimeCLIPath = this.env[RUNTIME_CLI_FILEPATH_CONFIG_VAR_NAME] || `${__dirname}/../node_modules/@heroku/sf-fx-runtime-nodejs/bin/cli.js`;
+        this.runtimeCLIPath = this.env[RUNTIME_CLI_FILEPATH_CONFIG_VAR_NAME]
+            || `${__dirname}/../node_modules/@heroku/sf-fx-runtime-nodejs/bin/cli.js`;
         this.herokuServicePort = this.env[HEROKU_SERVICE_PORT_CONFIG_VAR_NAME] || 8080;
         this.herokuServiceDebugPort = this.env[DEBUG_PORT_CONFIG_VAR_NAME];
         this.herokuServiceUrl = `${(this.env[HEROKU_SERVICE_URL_CONFIG_VAR_NAME] || 'http://localhost')}:${this.herokuServicePort}`;
-        this.orgId18 = this.env[ORG_ID_18_CONFIG_VAR_NAME];
-        const encodedPrivateKey = this.env[ENCODED_PRIVATE_KEY_CONFIG_VAR_NAME];
+        //this.orgId18 = this.env[ORG_ID_18_CONFIG_VAR_NAME];
+        this.authorizedOrgId18s = this.filter(this.env, /(SALESFORCE_ADDON|SALESFORCEAUTH_([A-Z]*))_(00D[A-Za-z0-9]{15})_ORG_ID_18/);
+        this.authZConfig = {};
+        this.authorizedOrgId18s.forEach((orgId) => {
+            const consumerKeyRegEx = new RegExp(
+                `(SALESFORCE_ADDON|SALESFORCEAUTH_([A-Z]*))_(${orgId.toUpperCase()})_CONSUMER_KEY`, 'g')
+            const tmpConsumerKey = this.filter(this.env, consumerKeyRegEx);
+            if (!tmpConsumerKey || tmpConsumerKey.length !== 1) {
+                throw Error(`Did not find CONSUMER_KEY for authorized org ${orgId}`);
+            }
+
+            const encodedPrivateKeyRegEx = new RegExp(
+                `(SALESFORCE_ADDON|SALESFORCEAUTH_([A-Z]*))_(${orgId.toUpperCase()})_ENCODED_PRIVATE_KEY`, 'g')
+            const tmpEncodedPrivateKey = this.filter(this.env, encodedPrivateKeyRegEx);
+            if (!tmpEncodedPrivateKey || tmpEncodedPrivateKey.length !== 1) {
+                throw Error(`Did not find ENCODED_PRIVATE_KEY for authorized org ${orgId}`);
+            }
+
+            this.authZConfig[orgId] = {
+                consumerKey: tmpConsumerKey[0],
+                privateKey: Buffer.from(tmpEncodedPrivateKey[0], 'base64').toString('utf8')
+            };
+        });
+        console.log(`AuthZConfig: ${JSON.stringify(this.authZConfig)}`);
+        /*const encodedPrivateKey = this.env[ENCODED_PRIVATE_KEY_CONFIG_VAR_NAME];
         if (encodedPrivateKey) {
             this.privateKey = Buffer.from(encodedPrivateKey, 'base64').toString('utf8');
         } else if (this.env[PRIVATE_KEY_FILEPATH_CONFIG_VAR_NAME]) {
             this.privateKey = readFileSync(this.env[PRIVATE_KEY_FILEPATH_CONFIG_VAR_NAME]);
-        }
+        }*/
         this.clientId = this.env[CONSUMER_KEY_CONFIG_VAR_NAME];
         this.audience = this.env[SF_AUDIENCE_CONFIG_VAR_NAME];
 
@@ -86,11 +120,33 @@ export class Config {
             throw Error(`Function start CLI not found ${this.runtimeCLIPath}.  Ensure that herokuService's buildpack ./bin/compile was run.`);
         }
 
-        validateRequiredConfig(ORG_ID_18_CONFIG_VAR_NAME, this.orgId18);
+        /*validateRequiredConfig(ORG_ID_18_CONFIG_VAR_NAME, this.orgId18);
         validateRequiredConfig(HEROKU_SERVICE_PORT_CONFIG_VAR_NAME, this.herokuServicePort);
         validateRequiredConfig(`${ENCODED_PRIVATE_KEY_CONFIG_VAR_NAME} or ${PRIVATE_KEY_FILEPATH_CONFIG_VAR_NAME}`,
             this.privateKey);
-        validateRequiredConfig(CONSUMER_KEY_CONFIG_VAR_NAME, this.clientId);
+        validateRequiredConfig(CONSUMER_KEY_CONFIG_VAR_NAME, this.clientId);*/
+
+        const misconfigurations = [];
+        if (this.authorizedOrgId18s.length > 0) {
+            this.authorizedOrgId18s.forEach((orgId) => {
+                const orgAuthZConfig = this.authZConfig[orgId];
+                if (!orgAuthZConfig) {
+                    misconfigurations.push(`Missing authZ config for org ${orgId}`);
+                } else {
+                    if (!('consumerKey' in orgAuthZConfig)) {
+                        misconfigurations.push(`Missing CONSUMER_KEY authZ config var for org ${orgId}`);
+                    }
+
+                    if (!('privateKey' in orgAuthZConfig)) {
+                        misconfigurations.push(`Missing ENCODED_PRIVATE_KEY authZ config var for org ${orgId}`);
+                    }
+                }
+            });
+        }
+
+        if (misconfigurations.length > 0) {
+            throw Error(`Found misconfigured Salesforce authorizations: ${JSON.stringify(misconfigurations)}`);
+        }
 
         return this;
     }
