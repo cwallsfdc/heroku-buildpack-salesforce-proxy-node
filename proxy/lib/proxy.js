@@ -75,8 +75,10 @@ export class Config {
         this.herokuServiceUrl = `${(this.env[HEROKU_SERVICE_URL_CONFIG_VAR_NAME] || 'http://localhost')}:${this.herokuServicePort}`;
         //this.orgId18 = this.env[ORG_ID_18_CONFIG_VAR_NAME];
         this.authorizedOrgId18s = this.filter(this.env, /(SALESFORCE_ADDON|SALESFORCEAUTH_([A-Z]*))_(00D[A-Za-z0-9]{15})_ORG_ID_18/);
+        console.log(`Auhtorized orgs: ${JSON.stringify(this.authorizedOrgId18s)}`);
         this.authZConfig = {};
         this.authorizedOrgId18s.forEach((orgId) => {
+            console.log(`Inspecting org: ${orgId}`);
             const consumerKeyRegEx = new RegExp(
                 `(SALESFORCE_ADDON|SALESFORCEAUTH_([A-Z]*))_(${orgId.toUpperCase()})_CONSUMER_KEY`, 'g')
             const tmpConsumerKey = this.filter(this.env, consumerKeyRegEx);
