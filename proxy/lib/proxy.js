@@ -8,12 +8,12 @@ import proxy from '@fastify/http-proxy';
 const __dirname = path.resolve();
 
 // Customer-provided configuration
-const ORG_ID_18_CONFIG_VAR_NAME = 'SALESFORCE_ADDON_ORG_ID_18';
+//const ORG_ID_18_CONFIG_VAR_NAME = 'SALESFORCE_ADDON_ORG_ID_18';
 const HEROKU_SERVICE_URL_CONFIG_VAR_NAME = 'HEROKU_SERVICE_URL';
 const HEROKU_SERVICE_PORT_CONFIG_VAR_NAME = 'HEROKU_SERVICE_PORT';
-const ENCODED_PRIVATE_KEY_CONFIG_VAR_NAME = 'SALESFORCE_ADDON_ENCODED_PRIVATE_KEY';
-const PRIVATE_KEY_FILEPATH_CONFIG_VAR_NAME = 'PRIVATE_KEY_FILEPATH';
-const CONSUMER_KEY_CONFIG_VAR_NAME = 'SALESFORCE_ADDON_CONSUMER_KEY';
+//const ENCODED_PRIVATE_KEY_CONFIG_VAR_NAME = 'SALESFORCE_ADDON_ENCODED_PRIVATE_KEY';
+//const PRIVATE_KEY_FILEPATH_CONFIG_VAR_NAME = 'PRIVATE_KEY_FILEPATH';
+//const CONSUMER_KEY_CONFIG_VAR_NAME = 'SALESFORCE_ADDON_CONSUMER_KEY';
 const DEBUG_PORT_CONFIG_VAR_NAME = 'DEBUG_PORT';
 const RUNTIME_CLI_FILEPATH_CONFIG_VAR_NAME = 'RUNTIME_CLI_FILEPATH';
 const SF_AUDIENCE_CONFIG_VAR_NAME = 'SF_AUDIENCE';
@@ -105,7 +105,8 @@ export class Config {
         } else if (this.env[PRIVATE_KEY_FILEPATH_CONFIG_VAR_NAME]) {
             this.privateKey = readFileSync(this.env[PRIVATE_KEY_FILEPATH_CONFIG_VAR_NAME]);
         }*/
-        this.clientId = this.env[CONSUMER_KEY_CONFIG_VAR_NAME];
+
+        //this.clientId = this.env[CONSUMER_KEY_CONFIG_VAR_NAME];
         this.audience = this.env[SF_AUDIENCE_CONFIG_VAR_NAME];
 
         return this;
@@ -183,7 +184,7 @@ class BaseContext {
  *     'permissionSets': '[ 'MyPermissionSet' ]'
  *   }
  */
-export class FunctionContext extends BaseContext {
+export class HerokuServiceContext extends BaseContext {
     constructor(requestId, encodedContext) {
         super(requestId);
         this.sfFnContext =  super.decodeAndParse(encodedContext);
@@ -310,7 +311,7 @@ class BaseRequestHandler {
     /**
      * Parse and validate 'ce-sffncontext' and 'ce-sfcontext' headers.  See FunctionContext and SalesforceContext.
      *
-     * @returns {{sfFnContext: FunctionContext, sfContext: SalesforceContext}}
+     * @returns {{sfFnContext: HerokuServiceContext, sfContext: SalesforceContext}}
      */
     parseAndValidateContexts() {
         const headers = this.request.headers;
@@ -323,7 +324,7 @@ class BaseRequestHandler {
 
         let sfFnContext;
         try {
-            sfFnContext = new FunctionContext(this.requestId, encodedFunctionContextHeader);
+            sfFnContext = new HerokuServiceContext(this.requestId, encodedFunctionContextHeader);
         } catch (err) {
             throwError(`Invalid ${HEADER_HEROKU_SERVICE_REQUEST_CONTEXT} format - expected base64 encoded header: ${err.message}`, 400, this.requestId);
         }
@@ -448,8 +449,8 @@ class BaseRequestHandler {
             throwError(`Unable to validate request (/userinfo): ${err.message}`, this.requestId);
         }
 
-        if (!userInfo || this.config.orgId18 !== userInfo.organization_id) {
-            this.logger.warn(`Unauthorized caller from Organization ${userInfo.organization_id}, expected ${this.config.orgId18}`);
+        if (!userInfo || !this.config.authorizedOrgId18s.includes(userInfo.organization_id)) {
+            this.logger.warn(`Unauthorized caller from Organization ${userInfo.organization_id}, expected one of ${JSON.stringify(this.config.authorizedOrgId18s)}`);
             throwError('Unauthorized request', 401, this.requestId);
         }
 
@@ -459,14 +460,14 @@ class BaseRequestHandler {
     /**
      * Validate expected payload and that the Heroku Service invoker is of the expected org.
      *
-     * @returns {Promise<{requestId: string, requestProvidedAccessToken: string, sfFnContext: FunctionContext, sfContext: SalesforceContext}>}
+     * @returns {Promise<{requestId: string, requestProvidedAccessToken: string, sfFnContext: HerokuServiceContext, sfContext: SalesforceContext}>}
      */
     async validate() {
         // Parse and validate request
-        const {requestId, requestProvidedAccessToken} = this.parseAndValidateHeaders();
+        const { requestId, requestProvidedAccessToken} = this.parseAndValidateHeaders();
 
         // Parse and validate Heroku Service and salesforce contexts
-        const {sfFnContext, sfContext} = this.parseAndValidateContexts();
+        const { sfFnContext, sfContext} = this.parseAndValidateContexts();
 
         // Validate that the context's orgId matches the accessToken
         await this.validateCaller(sfContext.userContext.orgDomainUrl, requestProvidedAccessToken);
@@ -487,17 +488,24 @@ class BaseRequestHandler {
      * @returns {Promise<String>}
      */
     async mintToken(sfFnContext, sfContext) {
+        const authZConfig = this.config.authZConfig[sfContext.userContext.orgId];
+        if (!authZConfig || !authZConfig.consumerKey || !authZConfig.privateKey) {
+            const errMsg = `AuthZ config not found for org ${sfContext.userContext.orgId}`;
+            this.logger.error(errMsg);
+            throwError(errMsg, 403, this.requestId);
+        }
+
         const url = `${sfContext.userContext.orgDomainUrl}/services/oauth2/token`;
         const isTest = (url.includes('.sandbox.') || url.includes('.scratch.'));
 
         const jwtOpts = {
-            issuer: this.config.clientId,
+            issuer: authZConfig.consumerKey,
             audience: this.config.audience || (isTest ? SANDBOX_AUDIENCE_URL : PROD_AUDIENCE_URL),
             algorithm: 'RS256',
             expiresIn: 360,
         }
 
-        const signedJWT = jwt.sign({prn: sfContext.userContext.username}, this.config.privateKey, jwtOpts);
+        const signedJWT = jwt.sign({prn: sfContext.userContext.username}, authZConfig.privateKey, jwtOpts);
         const opts = {
             method: 'POST',
             headers: {
@@ -534,7 +542,7 @@ class BaseRequestHandler {
             throwError(errMsg, 403, this.requestId);
         }
 
-        this.logger.info(`[${this.requestId}] Minted herokuService's token - hooray`);
+        this.logger.info(`[${this.requestId}] Minted Heroku Service ${sfFnContext.herokuServiceName}'s token - hooray`);
 
         return {
             herokuServiceAccessToken: mintTokenResponse.access_token,
@@ -625,7 +633,7 @@ class BaseRequestHandler {
         sfFnContext.setAccessToken(herokuServiceAccessToken);
         this.request.headers[HEADER_HEROKU_SERVICE_REQUEST_CONTEXT] = sfFnContext.toJsonEncoded();
 
-        this.logger.info(`[${this.requestId}] Prepared Heroku Service request - let's go`);
+        this.logger.info(`[${this.requestId}] Prepared Heroku Service ${sfFnContext.herokuServiceName}'s request - let's go`);
     }
 
     /**
@@ -759,9 +767,9 @@ export class AsyncRequestHandler extends BaseRequestHandler {
         }
 
         if (!response || response.statusCode !== 204) {
-            this.logger.error(`[${this.requestId}] Unable to save Heroku Service response to ${afirObjectName} [${herokuServiceInvocationId}]: ${JSON.stringify(response.errors.join(','))}`);
+            this.logger.error(`[${this.requestId}] Unable to save Heroku Service ${sfFnContext.herokuServiceName} response to ${afirObjectName} [${herokuServiceInvocationId}]: ${JSON.stringify(response.errors.join(','))}`);
         } else {
-            this.logger.info(`[${this.requestId}] Updated Heroku Service response [${statusCode}] to ${afirObjectName} [${herokuServiceInvocationId}]`);
+            this.logger.info(`[${this.requestId}] Updated Heroku Service ${sfFnContext.herokuServiceName} response [${statusCode}] to ${afirObjectName} [${herokuServiceInvocationId}]`);
         }
     }
 
@@ -827,8 +835,8 @@ export class HealthCheckRequestHandler extends BaseRequestHandler {
         this.request.log.info('Handling Heroku Service /healthcheck request');
 
         const orgId18 = this.request.headers[HEADER_ORG_ID_18];
-        if (!orgId18 || this.config.orgId18 !== orgId18) {
-            this.logger.warn(`[${this.requestId}] Unauthorized caller from Organization ${orgId18}, expected ${this.config.orgId18}`);
+        if (!orgId18 || !this.config.authorizedOrgId18s.includes(orgId18)) {
+            this.logger.warn(`[${this.requestId}] Unauthorized caller from Organization ${orgId18}, expected one of ${JSON.stringify(this.config.authorizedOrgId18s)}`);
             throwError('Unauthorized request', 401, this.requestId);
         }
 

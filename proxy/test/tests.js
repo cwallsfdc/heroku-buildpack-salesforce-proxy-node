@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import {
     AsyncRequestHandler,
     Config,
-    FunctionContext,
+    HerokuServiceContext,
     ProxyServer,
     SalesforceContext,
     HttpRequestUtil,
@@ -65,9 +65,9 @@ describe('Handle Function Request', () => {
                 const sfFnContext = {
                     'requestId': requestId,
                     'accessToken': undefined,
-                    'functionName': 'myproject.typescriptfunction',
-                    'functionInvocationId': undefined,
-                    'type': 'com.salesforce.function.invoke.sync',
+                    'herokuServiceName': 'myproject.typescriptfunction',
+                    'herokuServiceInvocationId': undefined,
+                    'type': 'com.salesforce.herokuservice.invoke.sync',
                     'permissionSets': ['Functions']
                 };
                 const sfContext = {
@@ -99,7 +99,7 @@ describe('Handle Function Request', () => {
         describe('validate caller', function () {
             it('happy path', async function () {
                 const config = {
-                    'orgId18': '00Dxx0000006JX6EAM'
+                    'authorizedOrgId18s': [ '00Dxx0000006JX6EAM' ]
                 }
                 const request = {
                     headers: {
@@ -109,7 +109,7 @@ describe('Handle Function Request', () => {
                 }
                 const instanceUrl = 'https://sf-fx-dh.my.salesforce.com';
                 const requestProvidedAccessToken = 'requestProvidedAccessToken';
-                const userInfoResponse = {'organization_id': config.orgId18};
+                const userInfoResponse = {'organization_id': config.authorizedOrgId18s[0]};
                 const requestStub = sandbox.stub(HttpRequestUtil.prototype, 'request')
                     .resolves(userInfoResponse);
                 const handler = new SyncRequestHandler(config, request, {});
@@ -121,7 +121,7 @@ describe('Handle Function Request', () => {
         describe('mint token', function () {
             it('happy path', async function () {
                 const config = {
-                    'clientId': 'clientId',
+                    'authZConfig': { '00Dxx0000006JX6EAM' : { consumerKey: 'consumerKey', privateKey: 'privateKey' } },
                     'audience': 'audience'
                 };
                 const sfContext = {
@@ -129,7 +129,8 @@ describe('Handle Function Request', () => {
                     'apiVersion': '57.0',
                     'userContext': {
                         'username': 'admin@sf-fx-dh.com',
-                        'orgDomainUrl': 'https://sf-fx-dh.my.salesforce.com'
+                        'orgDomainUrl': 'https://sf-fx-dh.my.salesforce.com',
+                        'orgId': '00Dxx0000006JX6EAM'
                     }
                 };
                 const request = {
@@ -150,7 +151,7 @@ describe('Handle Function Request', () => {
                 expect(signStub.calledOnce).to.be.true;
                 expect(requestStub.calledOnce).to.be.true;
                 expect(mintTokenResult).to.deep.include({
-                    functionsAccessToken: mintTokenResponse.access_token,
+                    herokuServiceAccessToken: mintTokenResponse.access_token,
                     instanceUrl: mintTokenResponse.instance_url
                 });
             });
@@ -194,7 +195,7 @@ describe('Handle Function Request', () => {
             const requestStub = sandbox.stub(HttpRequestUtil.prototype, 'request')
                 .resolves(activationResponse);
             const handler = new SyncRequestHandler({}, request, {});
-            await handler.activateSessionPermSet(sfFnContext, sfContext, 'functionsAccessToken');
+            await handler.activateSessionPermSet(sfFnContext, sfContext, 'herokuServiceAccessToken');
             expect(requestStub.calledOnce).to.be.true;
         }
 
@@ -212,16 +213,16 @@ describe('Handle Function Request', () => {
 
         describe('prepare function request', function () {
             it('happy path', async function () {
-                const functionsAccessToken = 'functionsAccessToken';
+                const herokuServiceAccessToken = 'herokuServiceAccessToken';
                 const toBeEncodedSfFnContext = {
                     'requestId': requestId,
                     'accessToken': undefined,
-                    'functionName': 'myproject.typescriptfunction',
-                    'functionInvocationId': 'functionInvocationId',
-                    'type': 'com.salesforce.function.invoke.sync',
+                    'herokuServiceName': 'myproject.typescriptfunction',
+                    'herokuServiceInvocationId': 'herokuServiceInvocationId',
+                    'type': 'com.salesforce.herokuservice.invoke.sync',
                     'permissionSets': ['Functions']
                 };
-                const sfFnContext = new FunctionContext('requestId',
+                const sfFnContext = new HerokuServiceContext('requestId',
                     Buffer.from(JSON.stringify(toBeEncodedSfFnContext), 'utf8').toString('base64'));
                 const request = {
                     headers: {
@@ -231,25 +232,25 @@ describe('Handle Function Request', () => {
                     log
                 };
                 const handler = new SyncRequestHandler({}, request, {});
-                await handler.prepareFunctionRequest(sfFnContext, functionsAccessToken);
+                await handler.prepareFunctionRequest(sfFnContext, herokuServiceAccessToken);
                 const updatedSfFnContextStr = Buffer.from(request.headers['ce-sffncontext'], 'base64').toString('utf8');
                 const updatedSfFnContext = JSON.parse(updatedSfFnContextStr);
                 expect(updatedSfFnContext.accessToken).to.not.be.undefined;
-                expect(updatedSfFnContext.accessToken).to.equal(functionsAccessToken);
+                expect(updatedSfFnContext.accessToken).to.equal(herokuServiceAccessToken);
             });
         });
     });
 
     describe('Async', () => {
 
-        describe('parse context headers w/ sfFnContext.functionInvocationId', function () {
+        describe('parse context headers w/ sfFnContext.herokuServiceInvocationId', function () {
             it('happy path', async function () {
                 const sfFnContext = {
                     'requestId': requestId,
                     'accessToken': undefined,
-                    'functionName': 'myproject.typescriptfunction',
-                    'functionInvocationId': 'functionInvocationId',
-                    'type': 'com.salesforce.function.invoke.sync',
+                    'herokuServiceName': 'myproject.typescriptfunction',
+                    'herokuServiceInvocationId': 'herokuServiceInvocationId',
+                    'type': 'com.salesforce.herokuservice.invoke.sync',
                     'permissionSets': ['Functions']
                 };
                 const sfContext = {
@@ -292,10 +293,10 @@ describe('Handle Async Function Response', () => {
         it('happy path', async function () {
             const sfFnContext = {
                 'requestId': requestId,
-                'accessToken': 'functionsAccessToken',
-                'functionName': 'myproject.typescriptfunction',
-                'functionInvocationId': 'functionInvocationId',
-                'type': 'com.salesforce.function.invoke.sync',
+                'accessToken': 'herokuServiceAccessToken',
+                'herokuServiceName': 'myproject.typescriptfunction',
+                'herokuServiceInvocationId': 'herokuServiceInvocationId',
+                'type': 'com.salesforce.herokuservice.invoke.sync',
                 'permissionSets': ['Functions']
             };
             const sfContext = {
@@ -346,10 +347,10 @@ describe('Handle Async Function Response', () => {
     const updateAsyncFunctionResponseTest = async (namespace) => {
         const sfFnContext = {
             'requestId': requestId,
-            'accessToken': 'functionsAccessToken',
-            'functionName': 'myproject.typescriptfunction',
-            'functionInvocationId': 'functionInvocationId',
-            'type': 'com.salesforce.function.invoke.sync',
+            'accessToken': 'herokuServiceAccessToken',
+            'herokuServiceName': 'myproject.typescriptfunction',
+            'herokuServiceInvocationId': 'herokuServiceInvocationId',
+            'type': 'com.salesforce.herokuservice.invoke.sync',
             'permissionSets': ['Functions']
         };
         const sfContext = {
